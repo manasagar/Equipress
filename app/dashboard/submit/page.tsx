@@ -1,7 +1,8 @@
+// @ts-nocheck
 "use client"
 
 import type React from "react"
-
+import axios from "axios"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,14 +12,14 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FileUploader } from "@/components/file-uploader"
 import { useRouter } from "next/navigation"
-import { AlertCircle, FileText, LinkIcon, Plus } from "lucide-react"
+import { AlertCircle, CheckCircle, FileText, LinkIcon, Plus, XCircle } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ArticlePreview } from "@/components/article-preview"
 import { SubmissionConfirmation } from "@/components/submission-confirmation"
 import { useAuth } from "@/contexts/auth-context"
-import { FactCheckResults } from "@/components/fact-check-results"
+import { Progress } from "@/components/ui/progress"
 
 export default function SubmitArticlePage() {
   const router = useRouter()
@@ -46,41 +47,53 @@ export default function SubmitArticlePage() {
     setSources(updatedSources)
   }
 
-  // Function to run ML fact-checking
-  const runFactCheck = async () => {
-    if (!content.trim()) {
-      return
+  function parseClaimsResponse(apiResponse: any) {
+    if (!apiResponse || !Array.isArray(apiResponse.claims)) {
+      throw new Error("Invalid API response format")
     }
+    return apiResponse.claims.map((claim: any) => ({
+      id: claim.id,
+      text: claim.text,
+      status: claim.status,
+      confidence: claim.confidence,
+      evidence: claim.evidence,
+    }))
+  }
 
+  // Calculate average confidence score from all claims
+  const calculateAverageConfidence = (claims) => {
+    if (!claims || claims.length === 0) {
+      return 0
+    }
+    
+    const totalConfidence = claims.reduce(
+      (sum, claim) => sum + (claim.confidence || 0),
+      0
+    )
+    
+    return Math.round((totalConfidence / claims.length) * 100)
+  }
+
+  const runFactCheck = async () => {
+    console.log("randi" + content)
+
+    if (!content.trim()) return
     setIsFactChecking(true)
+    setFactCheckResults(null)
+    console.log("randi")
 
     try {
-      // Simulate API call to ML service
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-
-      // Mock response from fact-checking service
-      const results = {
-        score: Math.floor(Math.random() * 40) + 60, // Random score between 60-100
-        confidence: Math.floor(Math.random() * 20) + 75, // Random confidence between 75-95
-        flaggedClaims: [
-          {
-            text: content.split(". ")[0] + ".",
-            veracity: Math.random() > 0.7 ? "questionable" : "supported",
-            sources: ["https://example.com/source1", "https://example.com/source2"],
-          },
-          {
-            text: content.split(". ").length > 1 ? content.split(". ")[1] + "." : "",
-            veracity: Math.random() > 0.5 ? "supported" : "questionable",
-            sources: ["https://example.com/source3"],
-          },
-        ],
-        suggestedSources: [
-          { title: "Academic Research Paper", url: "https://example.edu/research" },
-          { title: "Government Data Repository", url: "https://data.gov/example" },
-        ],
-      }
-
-      setFactCheckResults(results)
+      const response = await axios.post('http://127.0.0.1:8000/echo', { text: content })
+      const parsedClaims =  parseClaimsResponse(response.data)
+      
+      // Calculate average confidence score
+      const averageConfidence = calculateAverageConfidence(parsedClaims)
+      
+      // Set complete results with score and flagged claims
+      setFactCheckResults({
+        score: averageConfidence,
+        flaggedClaims: parsedClaims
+      })
     } catch (error) {
       console.error("Error during fact checking:", error)
     } finally {
@@ -89,12 +102,13 @@ export default function SubmitArticlePage() {
   }
 
   // Update the handleSubmit function
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleManas = async (e: React.FormEvent) => {
     e.preventDefault()
+    setIsFactChecking(true)
+    console.log("randi")
     setIsSubmitting(true)
-
     // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await runFactCheck();
 
     // Set a mock article ID (in a real app, this would come from the backend)
     setSubmittedArticleId(Math.floor(Math.random() * 1000) + 1)
@@ -268,7 +282,7 @@ export default function SubmitArticlePage() {
                 <Button type="button" variant="outline" onClick={() => router.back()}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={!content}>
+                <Button type="submit" >
                   Run Fact Check
                 </Button>
               </div>
@@ -326,7 +340,7 @@ export default function SubmitArticlePage() {
             <Button variant="outline" onClick={() => setActiveTab("fact-check")}>
               Back to Fact Check
             </Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
+            <Button  disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit Article"}
             </Button>
           </div>
@@ -338,6 +352,181 @@ export default function SubmitArticlePage() {
           <SubmissionConfirmation articleId={submittedArticleId} onClose={resetForm} />
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+// FactCheckResults component embedded in the same file
+function FactCheckResults({ results }) {
+  // Calculate average confidence from all claims
+  const calculateAverageConfidence = () => {
+    if (!results?.flaggedClaims || results.flaggedClaims.length === 0) {
+      return 0
+    }
+    
+    const totalConfidence = results.flaggedClaims.reduce(
+      (sum, claim) => sum + (claim.confidence || 0),
+      0
+    )
+    
+    return Math.round((totalConfidence / results.flaggedClaims.length) * 100)
+  }
+  
+  const averageConfidence = results.score || calculateAverageConfidence()
+  
+  // Helper function to get status icon
+  const getStatusIcon = (status) => {
+    if (status === "SUPPORTED" || status === "supported") {
+      return <CheckCircle className="h-5 w-5 text-green-600" />
+    } else if (status === "REFUTED" || status === "refuted" || status === "questionable") {
+      return <XCircle className="h-5 w-5 text-red-600" />
+    } else {
+      return <AlertCircle className="h-5 w-5 text-yellow-600" />
+    }
+  }
+
+  // Helper function to get status text color
+  const getStatusTextColor = (status) => {
+    if (status === "SUPPORTED" || status === "supported") {
+      return "text-green-600"
+    } else if (status === "REFUTED" || status === "refuted" || status === "questionable") {
+      return "text-red-600"
+    } else {
+      return "text-yellow-600"
+    }
+  }
+
+  // Format status text for display
+  const formatStatus = (status) => {
+    if (!status) return "Unknown"
+    
+    const statusMap = {
+      "SUPPORTED": "Supported",
+      "supported": "Supported",
+      "REFUTED": "Refuted",
+      "refuted": "Refuted",
+      "questionable": "Questionable",
+      "UNCERTAIN": "Uncertain",
+      "uncertain": "Uncertain"
+    }
+    
+    return statusMap[status] || status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-medium">Fact Check Results</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Average Confidence:</span>
+            <span className="font-medium">{averageConfidence}%</span>
+          </div>
+        </div>
+        
+        <Progress value={averageConfidence} className="h-2 w-full" />
+        
+        <div className="mt-4">
+          {averageConfidence >= 75 ? (
+            <Alert className="bg-green-50 border-green-200">
+              <CheckCircle className="h-4 w-4 text-green-600" />
+              <AlertTitle>Good reliability score</AlertTitle>
+              <AlertDescription>
+                Your article appears to be well-supported by evidence. You may proceed to submission.
+              </AlertDescription>
+            </Alert>
+          ) : averageConfidence >= 50 ? (
+            <Alert className="bg-yellow-50 border-yellow-200">
+              <AlertCircle className="h-4 w-4 text-yellow-600" />
+              <AlertTitle>Moderate reliability score</AlertTitle>
+              <AlertDescription>
+                Some claims may need additional verification. Consider adding more sources or revising questionable content.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Alert className="bg-red-50 border-red-200">
+              <XCircle className="h-4 w-4 text-red-600" />
+              <AlertTitle>Low reliability score</AlertTitle>
+              <AlertDescription>
+                Your article contains several claims that couldn't be verified or were found to be inaccurate. 
+                Please revise before submitting.
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium">Analyzed Claims</h3>
+        
+        {!results?.flaggedClaims || results.flaggedClaims.length === 0 ? (
+          <div className="rounded-lg border p-6 text-center text-muted-foreground">
+            No claims were analyzed. Please try again.
+          </div>
+        ) : (
+          results.flaggedClaims.map((claim, index) => (
+            <Card key={index}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  {getStatusIcon(claim.status)}
+                  <span>Claim {claim.id || index + 1}</span>
+                  <span className={`ml-auto text-sm ${getStatusTextColor(claim.status)}`}>
+                    {formatStatus(claim.status)} 
+                    {claim.confidence && ` (${Math.round(claim.confidence * 100)}% confidence)`}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-md bg-muted p-3 text-sm">
+                  {claim.text}
+                </div>
+                
+                {claim.evidence && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">Evidence:</h4>
+                    <div className="rounded-md bg-slate-50 p-3 text-sm">
+                      {claim.evidence}
+                    </div>
+                  </div>
+                )}
+                
+                {claim.sources && claim.sources.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">Sources:</h4>
+                    <ul className="list-disc pl-5 text-sm">
+                      {claim.sources.map((source, i) => (
+                        <li key={i}>
+                          <a href={source} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                            {source}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+      
+      {results?.suggestedSources && results.suggestedSources.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Suggested Additional Sources</h3>
+          <div className="rounded-lg border p-4">
+            <ul className="space-y-2">
+              {results.suggestedSources.map((source, index) => (
+                <li key={index} className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{source.title}:</span>
+                  <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-sm">
+                    {source.url}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
